@@ -1,0 +1,41 @@
+name: Feature
+description: Request or track a new feature
+labels: ["type:feature"]
+body:
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One-line description of the feature
+      placeholder: e.g. Add JWT refresh token rotation
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context / Motivation
+      description: Why is this needed? Who benefits?
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: Bullet list of testable outcomes
+      placeholder: |
+        - [ ] Can refresh access token with valid cookie
+        - [ ] Invalid cookie returns 401
+    validations:
+      required: true
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size
+      options: ["S","M","L"]
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options: ["P1","P2","P3"]
+    validations:
+      required: true

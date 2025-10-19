@@ -1,0 +1,31 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: alias_mongo_private
+    ports:
+      - "${MONGO_PORT}:${MONGO_PORT}"
+    environment:
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME}
+    volumes:
+      - mongodb:/data/db
+
+  redis:
+    image: redis:7
+    container_name: alias_redis_private
+    ports:
+      - "${REDIS_PORT}:${REDIS_PORT}"
+
+  api:
+    build: .
+    container_name: alias_api_private
+    env_file:
+      - .env
+    ports:
+      - "${PORT}:${PORT}"
+    depends_on:
+      - mongo
+      - redis
+    command: npm run start:dev
+
+volumes:
+  mongodb:
