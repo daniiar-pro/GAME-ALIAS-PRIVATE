@@ -30,7 +30,7 @@ flowchart LR
     CS[ChatService]
   end
 
-  %% who consumes what
+
   GAME --> AUTH
   GAME --> USERS
   GAME --> WORDS
@@ -49,9 +49,9 @@ flowchart LR
   ROOM --> AUTH
   ROOM --> USERS
 
-  AUTH --> USERS   %% auth often needs user lookups
+  AUTH --> USERS  
 
-  %% exported providers (bold)
+
   style AS fill:#fff,stroke:#000,stroke-width:2px
   style US fill:#fff,stroke:#000,stroke-width:2px
   style WS fill:#fff,stroke:#000,stroke-width:2px
