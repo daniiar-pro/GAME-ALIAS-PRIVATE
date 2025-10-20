@@ -36,6 +36,9 @@ export class User {
   @Prop({ required: true })
   passwordHash: string;
 
+  @Prop({ type: [String], default: ['user'] })
+  roles: string[];
+
   @Prop({ default: 0, min: 0 })
   totalGames: number;
 

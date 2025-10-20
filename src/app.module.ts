@@ -23,7 +23,7 @@ import { Gateway } from './modules/gateway/gateway';
     MongooseModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        uri: config.get<string>('app.mongoUri', { infer: true }),
+        uri: config.get<string>('MONGO_URI', { infer: true }),
         // dbName: config.get<string>('MONGO_DB_NAME'), // only if not in URI
       }),
     }),
