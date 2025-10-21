@@ -64,7 +64,7 @@ Uses your existing User schema with refreshTokens: { tokenHash, expiresAt, creat
 
 # CHAT MODULE
 
-How to use (quick client snippet)
+## How to use (quick client snippet)
 
 HTTP
 
