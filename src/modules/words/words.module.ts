@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { Word, WordSchema } from 'src/infra/database/schemas';
 import { WordsService } from './words.service';
 import { WordsController } from './words.controller';
+import { SimilarityService } from './similarity.service';
 
 @Module({
   imports: [
@@ -10,6 +11,6 @@ import { WordsController } from './words.controller';
   ],
   providers: [WordsService],
   controllers: [WordsController],
-  exports: [WordsService],
+  exports: [WordsService, SimilarityService],
 })
 export class WordsModule {}

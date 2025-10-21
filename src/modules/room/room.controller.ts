@@ -3,134 +3,122 @@ import {
   Controller,
   Delete,
   Get,
-  HttpCode,
-  HttpStatus,
   Param,
   Post,
+  Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import { Request } from 'express';
 
 import { RoomService } from './room.service';
-import { Room } from '../../infra/database/schemas/room.schema';
 import { CreateRoomDto } from './dto/create-room.dto';
-// import { CreateTeamDto } from './dto/create-team.dto';
+import { SearchRoomsDto } from './dto/search-rooms.dto';
+import { CreateTeamDto } from './dto/create-team.dto';
+import { AssignUserDto } from './dto/assign-user.dto';
+import { StartRoomDto } from './dto/start-room.dto';
 
-@ApiTags('Room')
+// If guards are global (APP_GUARD), you can remove @UseGuards here.
+// Otherwise uncomment and use:
+// import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+// import { RolesGuard } from '../auth/guards/roles.guard';
+// import { Roles } from '../../shared/roles/roles.decorator';
+// import { Role } from '../../shared/roles/role.enum';
+
+function userIdFromReq(req: Request): string {
+  // adapt to your JWT payload shape; commonly req.user.sub or req.user.id
+  return (req as any)?.user?.sub ?? (req as any)?.user?.id;
+}
+
+@ApiTags('rooms')
+@ApiBearerAuth()
 @Controller('rooms')
 export class RoomController {
-  constructor(private readonly roomService: RoomService) {}
+  constructor(private readonly rooms: RoomService) {}
 
+  // @UseGuards(JwtAuthGuard)
   @Post()
-  @ApiOperation({ summary: 'Create a new room' })
-  @ApiResponse({
-    status: 201,
-    description: 'Room created successfully',
-    type: Room,
-  })
-  create(@Body() createRoomDto: CreateRoomDto) {
-    return this.roomService.createRoom(createRoomDto);
+  async create(@Body() dto: CreateRoomDto, @Req() req: Request) {
+    const userId = userIdFromReq(req);
+    return this.rooms.createRoom(dto, userId);
   }
 
+  // public list; protect if you want
   @Get()
-  @ApiOperation({ summary: 'Get all rooms' })
-  @ApiResponse({ status: 200, description: 'List of all rooms', type: [Room] })
-  findAll() {
-    return this.roomService.getAllRooms();
+  async search(@Query() q: SearchRoomsDto) {
+    return this.rooms.searchRooms(q);
   }
 
+  // @UseGuards(JwtAuthGuard)
   @Get(':id')
-  @ApiOperation({ summary: 'Get room by ID' })
-  @ApiResponse({ status: 200, description: 'Room details', type: Room })
-  findOne(@Param('id') id: string) {
-    return this.roomService.getRoomById(id);
+  async get(@Param('id') id: string) {
+    return this.rooms.getRoomById(id);
   }
 
+  // @UseGuards(JwtAuthGuard /*, RolesGuard*/ )
+  // @Roles(Role.Admin)
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete a room' })
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id') id: string) {
-    await this.roomService.deleteRoom(id);
+  @ApiOkResponse({ description: 'Room deleted' })
+  async remove(@Param('id') id: string, @Req() req: Request) {
+    const userId = userIdFromReq(req);
+    // pass isAdmin if your req.user carries roles; here we just pass false
+    await this.rooms.deleteRoom(id, userId, /* isAdmin */ false);
+    return { ok: true };
   }
 
-  // @Patch(':roomId/join/:userId')
-  // @ApiOperation({ summary: 'Join user to room' })
-  // @ApiResponse({ status: 200, description: 'User joined room', type: Room })
-  // joinRoom(@Param('roomId') roomId: string, @Param('userId') userId: string) {
-  //   return this.roomService.joinRoom(roomId, userId);
-  // }
+  // membership
+  // @UseGuards(JwtAuthGuard)
+  @Post(':id/join')
+  async join(@Param('id') id: string, @Req() req: Request) {
+    const userId = userIdFromReq(req);
+    return this.rooms.joinRoom(id, userId);
+  }
 
-  // @Patch(':roomId/leave/:userId')
-  // @ApiOperation({ summary: 'Leave room' })
-  // @ApiResponse({ status: 200, description: 'User left room', type: Room })
-  // leaveRoom(@Param('roomId') roomId: string, @Param('userId') userId: string) {
-  //   return this.roomService.leaveRoom(roomId, userId);
-  // }
+  // @UseGuards(JwtAuthGuard)
+  @Post(':id/leave')
+  async leave(@Param('id') id: string, @Req() req: Request) {
+    const userId = userIdFromReq(req);
+    return this.rooms.leaveRoom(id, userId);
+  }
 
-  // @Post(':roomId/teams')
-  // @ApiOperation({ summary: 'Create a new team in room' })
-  // @ApiResponse({ status: 201, description: 'Team created', type: Room })
-  // createTeam(
-  //   @Param('roomId') roomId: string,
-  //   @Body() createTeamDto: CreateTeamDto,
-  // ) {
-  //   return this.roomService.createTeam(
-  //     roomId,
-  //     createTeamDto.id,
-  //     createTeamDto.name,
-  //   );
-  // }
+  // teams
+  // @UseGuards(JwtAuthGuard)
+  @Post(':id/teams')
+  async createTeam(@Param('id') id: string, @Body() dto: CreateTeamDto) {
+    return this.rooms.createTeam(id, dto.name, dto.id);
+  }
 
-  // @Delete(':roomId/teams/:teamId')
-  // @ApiOperation({ summary: 'Delete a team from room' })
-  // @ApiResponse({ status: 200, description: 'Team deleted', type: Room })
-  // deleteTeam(@Param('roomId') roomId: string, @Param('teamId') teamId: string) {
-  //   return this.roomService.deleteTeam(roomId, teamId);
-  // }
+  // @UseGuards(JwtAuthGuard)
+  @Delete(':id/teams/:teamId')
+  async deleteTeam(@Param('id') id: string, @Param('teamId') teamId: string) {
+    return this.rooms.deleteTeam(id, teamId);
+  }
 
-  // @Patch(':roomId/teams/:teamId/assign/:userId')
-  // @ApiOperation({ summary: 'Assign user to a team' })
-  // @ApiResponse({
-  //   status: 200,
-  //   description: 'User assigned to team',
-  //   type: Room,
-  // })
-  // assignUserToTeam(
-  //   @Param('roomId') roomId: string,
-  //   @Param('teamId') teamId: string,
-  //   @Param('userId') userId: string,
-  // ) {
-  //   return this.roomService.assignUserToTeam(roomId, userId, teamId);
-  // }
+  // @UseGuards(JwtAuthGuard)
+  @Post(':id/teams/:teamId/assign')
+  async assign(
+    @Param('id') id: string,
+    @Param('teamId') teamId: string,
+    @Body() body: AssignUserDto,
+  ) {
+    return this.rooms.assignUser(id, teamId, body.userId);
+  }
 
-  // @Patch(':roomId/teams/:teamId/players/:userId')
-  // @ApiOperation({ summary: 'Remove user from team' })
-  // @ApiResponse({
-  //   status: 200,
-  //   description: 'User removed from team',
-  //   type: Room,
-  // })
-  // removeUserFromTeam(
-  //   @Param('roomId') roomId: string,
-  //   @Param('teamId') teamId: string,
-  //   @Param('userId') userId: string,
-  // ) {
-  //   return this.roomService.removeUserFromTeam(roomId, userId, teamId);
-  // }
+  // @UseGuards(JwtAuthGuard)
+  @Post(':id/teams/:teamId/remove')
+  async removeFromTeam(
+    @Param('id') id: string,
+    @Param('teamId') teamId: string,
+    @Body() body: AssignUserDto,
+  ) {
+    return this.rooms.removeUserFromTeam(id, teamId, body.userId);
+  }
 
-  // @Patch(':roomId/start')
-  // @ApiOperation({ summary: 'Start game in room' })
-  // @ApiResponse({
-  //   status: 200,
-  //   description: 'Game started successfully',
-  //   type: Room,
-  // })
-  // startRoom(
-  //   @Param('roomId') roomId: string,
-  //   @Query('maxRounds') maxRounds?: number,
-  // ) {
-  //   return this.roomService.startRoom(
-  //     roomId,
-  //     maxRounds,
-  //   );
-  // }
+  // start game
+  // @UseGuards(JwtAuthGuard)
+  @Post(':id/start')
+  async start(@Param('id') id: string, @Body() dto: StartRoomDto) {
+    return this.rooms.startRoom(id, dto.maxRounds ?? 5);
+  }
 }

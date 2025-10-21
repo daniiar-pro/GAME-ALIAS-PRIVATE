@@ -1,83 +1,148 @@
-## Table of Contents
+# CORE MODULES
 
-### Rules
+    1.	AuthModule: POST /auth/signup, POST /auth/login (username or email).
+    2.	UsersModule: GET /users/me, PATCH /users/me (username).
+    3.	WordsModule: seed service + SimilarityService + private draw(n) used by Game.
+    4.	RoomModule: create/list/get/join/leave + team CRUD (waiting phase).
+    5.	ChatModule: gateway + persistence + pagination + WS auth.
+    6.	GameModule: start → rounds/turns/guess/skip/end; emit events.
 
-- [Contributing](./CONTRIBUTING.md)
-- [Pull Request Template](pull_request_template.md)
+# AUTH MODULE
+
+    •	Signup & Login with bcrypt password hashing
+    •	JWT access token (Authorization: Bearer <token>)
+    •	Refresh token issued as httpOnly cookie and stored hashed in MongoDB
+    •	Rotate refresh tokens on /auth/refresh
+    •	Logout (current device) & Logout-all (revoke all refresh tokens)
+    •	JwtAuthGuard for protected routes
+    •	Roles decorator + guard for admin-only endpoints
+    •	Swagger decorators on DTOs you already started
+
+Uses your existing User schema with refreshTokens: { tokenHash, expiresAt, createdAt }[].
+
+# USER MODULE
+
+    •	GET /users/me – read your profile
+    •	PATCH /users/me – update username and/or email
+    •	PATCH /users/me/password – change password (verify current → set new)
+    •	UsersService exported so other modules (Auth/Game/Chat) can reuse it
+    •	Clean DTOs + Swagger + proper Mongo duplicate-key handling
+
+# WORDS MODULE
+
+    •	Mongoose model wiring
+    •	CRUD (admin-only for mutations)
+    •	Search with pagination
+    •	Random word sampler for rounds
+    •	Bulk insert (seeding)
+    •	A SimilarityService (Levenshtein + normalization) and a /words/check endpoint for guess validation
+    •	Clean DTOs + Swagger + duplicate‐key (11000) handling
+
+# ROOM MODULE
+
+    •	Room CRUD + search
+    •	Join/leave room
+    •	Teams management (create/delete, assign/remove players)
+    •	Start game (creates a Game doc, links it to the room, switches phase to inGame)
+    •	Guards-ready endpoints (you can flip on global guards or uncomment per-route guards)
+    •	Clean DTOs, Swagger docs, helpful errors
+
+    How it works (quick mental model)
+    •	Rooms are the waiting area: create, list, join/leave.
+    •	Teams live inside a room as embedded docs (simple + fast updates).
+    •	While phase = waiting you can edit teams and assignments.
+    •	POST /rooms/:id/start validates prerequisites (min players, everyone assigned), creates a Game doc (with fresh team scores), links it via activeGameId, and flips phase → inGame.
+    •	Later, your GameModule runs turns, scoring, etc., and when finished it can set room phase to finished.
+
+    If you prefer the GameModule to own creation, make RoomService.startRoom call a GameService.startForRoom(room, maxRounds) instead of touching the Game model directly.
 
 
-## Description
+    Security / Guards
+        •	If your JWT + Roles guards are global (APP_GUARD), you’re set.
+        •	If not, uncomment the @UseGuards lines and add your decorators.
+        •	Deleting a room is restricted to creator or admin (see deleteRoom()).
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+# CHAT MODULE
 
-## Project setup
+How to use (quick client snippet)
 
-```bash
-$ npm install
+HTTP
+
+```
+POST /chat/rooms/:roomId/messages with { content } in body → persists + echoes
+GET /chat/rooms/:roomId/messages?limit=50&before=<ISO> → history
 ```
 
-## Compile and run the project
+WS (Socket.IO)
 
-```bash
-# development
-$ npm run start
+```
+import { io } from 'socket.io-client';
+const socket = io('http://localhost:3000/chat', {
+  auth: { token: 'Bearer <JWT-HERE>' }, // or headers.authorization (Bearer ...)
+});
 
-# watch mode
-$ npm run start:dev
+// after 'ready'
+socket.emit('joinRoom', { roomId: '...' });
+socket.emit('sendMessage', { roomId: '...', content: 'hi!' });
+socket.on('message', (m) => console.log('message:', m));
 
-# production mode
-$ npm run start:prod
+socket.emit('history', { roomId: '...', limit: 50 });
+socket.on('history', (payload) => console.log(payload.items));
 ```
 
-## Run tests
+# GAME MODULE
 
-```bash
-# unit tests
-$ npm run test
+### How this hangs together
 
-# e2e tests
-$ npm run test:e2e
+Start game (REST POST /game/rooms/:roomId/start or WS start)
 
-# test coverage
-$ npm run test:cov
+Validates room → copies room.teams into a new Game doc → sets room.phase='inGame' & activeGameId → starts a turn timer for team 0.
+
+Turns
+
+Ephemeral TurnManagerService keeps {teamIndex, expiresAt} per room.
+
+- turn:start → (re)starts timer
+- Timeout → auto turn:next (via service callback)
+- turn:next → rotates team index, restarts timer
+
+Scoring
+
+- score endpoint/event increments teams.$.score atomically in the Game doc.
+
+Rounds & Finish
+
+- round:end increments currentRound (or finishes if == maxRounds) and resets the turn to team 0.
+- finish sets isFinished=true, clears in-memory timer, marks room finished.
+
+Real-time
+
+- Clients join channel game:<roomId>. After any change, the gateway emits state with the whole public game state so UIs can re-render (timer secondsLeft, scores, round, current team, etc.).
+
+### QUICK client usage (socket.IO)
+
 ```
+import { io } from 'socket.io-client';
 
-## Deployment
+const sock = io('http://localhost:3000/game', {
+  auth: { token: 'Bearer <JWT>' },
+});
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+sock.on('ready', () => {
+  sock.emit('join', { roomId: '<roomId>' });
+});
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+sock.on('state', (s) => console.log('state:', s));
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+// Start a game
+sock.emit('start', { roomId: '<roomId>', maxRounds: 5, turnSeconds: 60 });
+
+// During play
+sock.emit('turn:start', { roomId: '<roomId>' });
+sock.emit('score', { roomId: '<roomId>', teamId: 'teamA', delta: +1 });
+sock.emit('turn:next', { roomId: '<roomId>' });
+sock.emit('round:end', { roomId: '<roomId>' });
+
+// Finish
+sock.emit('finish', { roomId: '<roomId>' });
 ```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).

@@ -1,7 +1,30 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, FilterQuery } from 'mongoose';
-import { User, UserDocument } from 'src/infra/database/schemas';
+import type { Model } from 'mongoose';
+import * as bcrypt from 'bcryptjs';
+
+import { User, UserDocument } from '../../infra/database/schemas/user.schema';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { UserResponseDto } from './dto/user-response.dto';
+
+function toUserDto(doc: UserDocument): UserResponseDto {
+  return {
+    id: doc._id.toString(),
+    email: doc.email,
+    username: doc.username,
+    totalGames: doc.totalGames,
+    totalWins: doc.totalWins,
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    createdAt: doc.createdAt,
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    updatedAt: doc.updatedAt,
+  };
+}
 
 @Injectable()
 export class UsersService {
@@ -9,104 +32,73 @@ export class UsersService {
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
   ) {}
 
-  async findByEmail(email: string) {
-    return this.userModel.findOne({ email: email.toLowerCase() });
+  async getByIdOrThrow(userId: string): Promise<UserDocument> {
+    const user = await this.userModel.findById(userId).exec();
+    if (!user) throw new NotFoundException('User not found');
+    return user;
   }
 
-  async findById(id: string) {
-    return this.userModel.findById(id);
+  async getMe(userId: string): Promise<UserResponseDto> {
+    const user = await this.getByIdOrThrow(userId);
+    return toUserDto(user);
   }
 
-  // async create(data: {
-  //   email: string;
-  //   username: string;
-  //   passwordHash: string;
-  // }) {
-  //   try {
-  //     return await this.userModel.create({
-  //       email: data.email.toLowerCase(),
-  //       username: data.username.trim(),
-  //       passwordHash: data.passwordHash,
-  //     });
-  //   } catch (e: any) {
-  //     if (e?.code === 11000)
-  //       throw new ConflictException('Email or username already in use');
-  //     throw e;
-  //   }
-  // }
-
-  // async updateProfileMe(
-  //   userId: string,
-  //   patch: { email?: string; username?: string },
-  // ) {
-  //   const doc = await this.userModel.findById(userId);
-  //   if (!doc) throw new NotFoundException('User not found');
-
-  //   if (patch.email) doc.email = patch.email.toLowerCase();
-  //   if (patch.username) doc.username = patch.username.trim();
-
-  //   try {
-  //     await doc.save();
-  //     return doc;
-  //   } catch (e: any) {
-  //     if (e?.code === 11000)
-  //       throw new ConflictException('Email or username already in use');
-  //     throw e;
-  //   }
-  // }
-
-  // Admin
-  async list(params: {
-    q?: string;
-    role?: 'user' | 'admin';
-    limit?: number;
-    offset?: number;
-  }) {
-    const where: FilterQuery<UserDocument> = {};
-    if (params.role) where.role = params.role;
-    if (params.q) {
-      const q = params.q.trim();
-      where.$or = [
-        { email: { $regex: q, $options: 'i' } },
-        { username: { $regex: q, $options: 'i' } },
-      ];
+  async updateMe(
+    userId: string,
+    dto: UpdateProfileDto,
+  ): Promise<UserResponseDto> {
+    if (!dto || (!dto.username && !dto.email)) {
+      // Not strictly needed since DTO validated, but clearer error for clients
+      throw new ConflictException('Provide at least one field to update');
     }
-    const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
-    const offset = Math.max(params.offset ?? 0, 0);
 
-    const [items, total] = await Promise.all([
-      this.userModel
-        .find(where)
-        .sort({ createdAt: -1 })
-        .skip(offset)
-        .limit(limit)
-        .lean(),
-      this.userModel.countDocuments(where),
-    ]);
+    try {
+      const user = await this.userModel
+        .findByIdAndUpdate(
+          userId,
+          {
+            ...(dto.username ? { username: dto.username.trim() } : {}),
+            ...(dto.email ? { email: dto.email.toLowerCase().trim() } : {}),
+          },
+          { new: true, runValidators: true },
+        )
+        .exec();
 
-    return { items, total, limit, offset };
+      if (!user) throw new NotFoundException('User not found');
+      return toUserDto(user);
+    } catch (e: any) {
+      // Mongo duplicate key error (unique index)
+      if (e?.code === 11000) {
+        // figure out which field collided
+        const fields = Object.keys(e.keyPattern ?? {});
+        const field = fields[0] ?? 'field';
+        throw new ConflictException(`${field} already in use`);
+      }
+      throw e;
+    }
   }
 
-  async changeRole(id: string, role: 'user' | 'admin') {
-    const doc = await this.userModel.findByIdAndUpdate(
-      id,
-      { role },
-      { new: true },
-    );
-    if (!doc) throw new NotFoundException('User not found');
-    return doc;
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const user = await this.getByIdOrThrow(userId);
+
+    const ok = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!ok) throw new UnauthorizedException('Current password is incorrect');
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    user.passwordHash = newHash;
+    await user.save();
   }
 
-  async delete(id: string) {
-    const res = await this.userModel.findByIdAndDelete(id);
-    if (!res) throw new NotFoundException('User not found');
+  // handy helpers for other modules (Auth etc.)
+  async findByEmail(email: string) {
+    return this.userModel.findOne({ email: email.toLowerCase().trim() }).exec();
   }
 
-  // Stats helpers (use when game ends)
-  async incrementStats(userId: string, { games = 0, wins = 0 }) {
-    await this.userModel.updateOne(
-      { _id: userId },
-      { $inc: { totalGames: games, totalWins: wins } },
-    );
+  async findByUsername(username: string) {
+    return this.userModel.findOne({ username: username.trim() }).exec();
   }
 }

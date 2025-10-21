@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import {
   ChatMessage,
@@ -10,17 +10,20 @@ import {
 } from 'src/infra/database/schemas';
 import { ChatService } from './chat.service';
 import { ChatController } from './chat.controller';
+import { AuthModule } from '../auth/auth.module';
+import { RoomModule } from '../room/room.module';
+import { ChatGateway } from './chat.gateway';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: ChatMessage.name, schema: ChatMessageSchema },
-      { name: Room.name, schema: RoomSchema },
-      { name: User.name, schema: UserSchema },
+      forwardRef(() => AuthModule),
+      forwardRef(() => RoomModule),
     ]),
   ],
   providers: [ChatService],
-  controllers: [ChatController],
+  controllers: [ChatController, ChatGateway],
   exports: [ChatService],
 })
 export class ChatModule {}

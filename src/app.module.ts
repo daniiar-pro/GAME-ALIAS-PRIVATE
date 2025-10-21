@@ -11,6 +11,7 @@ import { ChatModule } from './modules/chat/chat.module';
 import { WordsModule } from './modules/words/words.module';
 import { RoomModule } from './modules/room/room.module';
 import { Gateway } from './modules/gateway/gateway';
+import { WordsService } from './modules/words/words.service';
 
 @Module({
   imports: [
@@ -37,4 +38,20 @@ import { Gateway } from './modules/gateway/gateway';
     Gateway,
   ],
 })
-export class AppModule {}
+export class AppModule {
+  constructor(private readonly words: WordsService) {
+    const pack = [
+      'apple',
+      'bridge',
+      'planet',
+      'violin',
+      'canyon',
+      'forest',
+      'camera',
+      'library',
+      'ocean',
+      'thunder',
+    ];
+    this.words.seedIfEmpty(pack).catch(() => void 0);
+  }
+}
